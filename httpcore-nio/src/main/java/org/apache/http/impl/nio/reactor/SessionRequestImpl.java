@@ -31,9 +31,10 @@ import java.io.IOException;
 import java.net.SocketAddress;
 import java.nio.channels.Channel;
 import java.nio.channels.SelectionKey;
+import java.util.concurrent.atomic.AtomicBoolean;
 
-import org.apache.http.annotation.ThreadingBehavior;
 import org.apache.http.annotation.Contract;
+import org.apache.http.annotation.ThreadingBehavior;
 import org.apache.http.nio.reactor.IOSession;
 import org.apache.http.nio.reactor.SessionRequest;
 import org.apache.http.nio.reactor.SessionRequestCallback;
@@ -47,14 +48,15 @@ import org.apache.http.util.Args;
 @Contract(threading = ThreadingBehavior.SAFE_CONDITIONAL)
 public class SessionRequestImpl implements SessionRequest {
 
-    private volatile boolean completed;
-    private volatile SelectionKey key;
-
     private final SocketAddress remoteAddress;
     private final SocketAddress localAddress;
     private final Object attachment;
     private final SessionRequestCallback callback;
+    private final AtomicBoolean completed;
 
+    private volatile SelectionKey key;
+
+    private volatile boolean terminated;
     private volatile int connectTimeout;
     private volatile IOSession session = null;
     private volatile IOException exception = null;
@@ -70,7 +72,7 @@ public class SessionRequestImpl implements SessionRequest {
         this.localAddress = localAddress;
         this.attachment = attachment;
         this.callback = callback;
-        this.connectTimeout = 0;
+        this.completed = new AtomicBoolean(false);
     }
 
     @Override
@@ -90,7 +92,11 @@ public class SessionRequestImpl implements SessionRequest {
 
     @Override
     public boolean isCompleted() {
-        return this.completed;
+        return this.completed.get();
+    }
+
+    boolean isTerminated() {
+        return this.terminated;
     }
 
     protected void setKey(final SelectionKey key) {
@@ -99,11 +105,11 @@ public class SessionRequestImpl implements SessionRequest {
 
     @Override
     public void waitFor() throws InterruptedException {
-        if (this.completed) {
+        if (this.completed.get()) {
             return;
         }
         synchronized (this) {
-            while (!this.completed) {
+            while (!this.completed.get()) {
                 wait();
             }
         }
@@ -125,16 +131,14 @@ public class SessionRequestImpl implements SessionRequest {
 
     public void completed(final IOSession session) {
         Args.notNull(session, "Session");
-        if (this.completed) {
-            return;
-        }
-        this.completed = true;
-        synchronized (this) {
-            this.session = session;
-            if (this.callback != null) {
-                this.callback.completed(this);
+        if (this.completed.compareAndSet(false, true)) {
+            synchronized (this) {
+                this.session = session;
+                if (this.callback != null) {
+                    this.callback.completed(this);
+                }
+                notifyAll();
             }
-            notifyAll();
         }
     }
 
@@ -142,45 +146,43 @@ public class SessionRequestImpl implements SessionRequest {
         if (exception == null) {
             return;
         }
-        if (this.completed) {
-            return;
-        }
-        this.completed = true;
-        final SelectionKey key = this.key;
-        if (key != null) {
-            key.cancel();
-            final Channel channel = key.channel();
-            try {
-                channel.close();
-            } catch (final IOException ignore) {}
-        }
-        synchronized (this) {
-            this.exception = exception;
-            if (this.callback != null) {
-                this.callback.failed(this);
-            }
-            notifyAll();
-        }
-    }
-
-    public void timeout() {
-        if (this.completed) {
-            return;
-        }
-        this.completed = true;
-        final SelectionKey key = this.key;
-        if (key != null) {
-            key.cancel();
-            final Channel channel = key.channel();
-            if (channel.isOpen()) {
+        if (this.completed.compareAndSet(false, true)) {
+            this.terminated = true;
+            final SelectionKey key = this.key;
+            if (key != null) {
+                key.cancel();
+                final Channel channel = key.channel();
                 try {
                     channel.close();
                 } catch (final IOException ignore) {}
             }
+            synchronized (this) {
+                this.exception = exception;
+                if (this.callback != null) {
+                    this.callback.failed(this);
+                }
+                notifyAll();
+            }
         }
-        synchronized (this) {
-            if (this.callback != null) {
-                this.callback.timeout(this);
+    }
+
+    public void timeout() {
+        if (this.completed.compareAndSet(false, true)) {
+            this.terminated = true;
+            final SelectionKey key = this.key;
+            if (key != null) {
+                key.cancel();
+                final Channel channel = key.channel();
+                if (channel.isOpen()) {
+                    try {
+                        channel.close();
+                    } catch (final IOException ignore) {}
+                }
+            }
+            synchronized (this) {
+                if (this.callback != null) {
+                    this.callback.timeout(this);
+                }
             }
         }
     }
@@ -203,25 +205,24 @@ public class SessionRequestImpl implements SessionRequest {
 
     @Override
     public void cancel() {
-        if (this.completed) {
-            return;
-        }
-        this.completed = true;
-        final SelectionKey key = this.key;
-        if (key != null) {
-            key.cancel();
-            final Channel channel = key.channel();
-            if (channel.isOpen()) {
-                try {
-                    channel.close();
-                } catch (final IOException ignore) {}
+        if (this.completed.compareAndSet(false, true)) {
+            this.terminated = true;
+            final SelectionKey key = this.key;
+            if (key != null) {
+                key.cancel();
+                final Channel channel = key.channel();
+                if (channel.isOpen()) {
+                    try {
+                        channel.close();
+                    } catch (final IOException ignore) {}
+                }
             }
-        }
-        synchronized (this) {
-            if (this.callback != null) {
-                this.callback.cancelled(this);
+            synchronized (this) {
+                if (this.callback != null) {
+                    this.callback.cancelled(this);
+                }
+                notifyAll();
             }
-            notifyAll();
         }
     }
 

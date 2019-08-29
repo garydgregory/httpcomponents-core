@@ -229,7 +229,11 @@ public class SSLIOSession implements IOSession, SessionBufferStatus, SocketAcces
             break;
         }
         if (this.handler != null) {
-            this.handler.initalize(this.sslEngine);
+            try {
+                this.handler.initalize(this.sslEngine);
+            } catch (final RuntimeException ex) {
+                throw convert(ex);
+            }
         }
         this.initialized = true;
         this.sslEngine.beginHandshake();
@@ -313,9 +317,11 @@ public class SSLIOSession implements IOSession, SessionBufferStatus, SocketAcces
 
                 // Perform operations
                 inEncryptedBuf.flip();
-                result = doUnwrap(inEncryptedBuf, inPlainBuf);
-                inEncryptedBuf.compact();
-
+                try {
+                    result = doUnwrap(inEncryptedBuf, inPlainBuf);
+                } finally {
+                    inEncryptedBuf.compact();
+                }
 
                 try {
                     if (!inEncryptedBuf.hasRemaining() && result.getHandshakeStatus() == HandshakeStatus.NEED_UNWRAP) {
@@ -426,10 +432,14 @@ public class SSLIOSession implements IOSession, SessionBufferStatus, SocketAcces
         // Acquire buffer
         final ByteBuffer outEncryptedBuf = this.outEncrypted.acquire();
 
+        final int bytesWritten;
         // Perform operation
         outEncryptedBuf.flip();
-        final int bytesWritten = this.session.channel().write(outEncryptedBuf);
-        outEncryptedBuf.compact();
+        try {
+            bytesWritten = this.session.channel().write(outEncryptedBuf);
+        } finally {
+            outEncryptedBuf.compact();
+        }
 
         // Release if empty
         if (outEncryptedBuf.position() == 0) {
@@ -466,10 +476,14 @@ public class SSLIOSession implements IOSession, SessionBufferStatus, SocketAcces
             final ByteBuffer inEncryptedBuf = this.inEncrypted.acquire();
             final ByteBuffer inPlainBuf = this.inPlain.acquire();
 
+            final SSLEngineResult result;
             // Perform operations
             inEncryptedBuf.flip();
-            final SSLEngineResult result = doUnwrap(inEncryptedBuf, inPlainBuf);
-            inEncryptedBuf.compact();
+            try {
+                result = doUnwrap(inEncryptedBuf, inPlainBuf);
+            } finally {
+                inEncryptedBuf.compact();
+            }
 
             try {
                 if (!inEncryptedBuf.hasRemaining() && result.getHandshakeStatus() == HandshakeStatus.NEED_UNWRAP) {
