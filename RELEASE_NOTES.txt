@@ -17,15 +17,15 @@ Changelog
   - Remote extra semicolons (;).
   Contributed by Gary Gregory <ggregory at apache.org>
 
-* Bug fix: non-blocking TLSv1.3 connections can end up in an infinite event spin when closed
+* Bug fix: Non-blocking TLSv1.3 connections can end up in an infinite event spin when closed
   concurrently by the local and the remote endpoints.
   Contributed by Oleg Kalnichevski <olegk at apache.org>
 
-* HTTPCORE-647: non-blocking connection terminated due to 'java.io.IOException: Broken pipe'
+* HTTPCORE-647: Non-blocking connection terminated due to 'java.io.IOException: Broken pipe'
   can enter an infinite loop flushing buffered output data.
   Contributed by Oleg Kalnichevski <olegk at apache.org>
 
-* PR #201, HTTPCORE-634: fix race condition in AbstractConnPool that can cause internal state
+* PR #201, HTTPCORE-634: Fix race condition in AbstractConnPool that can cause internal state
   corruption when persistent connections are manually removed from the pool.
   Contributed by djelinski <30433125+djelinski at users.noreply.github.com>
 
